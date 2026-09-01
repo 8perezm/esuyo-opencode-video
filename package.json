@@ -1,6 +1,6 @@
 {
   "name": "@esuyo/esuyo-opencode-video",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OpenCode plugin to send video as input_video to vision models with ffmpeg preprocessing (<1000x1000, 10fps) and automatic frame fallback",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,9 +29,13 @@
     "ffmpeg"
   ],
   "license": "MIT",
+  "homepage": "https://github.com/8perezm/esuyo-opencode-video",
+  "bugs": {
+    "url": "https://github.com/8perezm/esuyo-opencode-video/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/8perezm/esuyo-opencode-video.git"
+    "url": "git+https://github.com/8perezm/esuyo-opencode-video.git"
   },
   "engines": {
     "node": ">=18"

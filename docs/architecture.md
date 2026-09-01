@@ -43,9 +43,9 @@ VideoPlugin send_video.execute (src/index.ts:46)
 
 ## Key Modules
 
-- **src/index.ts** - single plugin file. Contains `VideoPlugin` init (ensures `.opencode/video-plugin.json` exists, logs) and `send_video` tool. All ffmpeg, fs, path, os, child_process are dynamically imported inside `execute` to keep init lightweight.
-- **Config:** `.opencode/video-plugin.json` (user project, not package) - optional overrides for resize/transcode/framesFallback/naming. Defaults in `src/index.ts:56`. Example in `examples/video-plugin.json:1`.
-- **Command:** `examples/video-command.md:1` - slash command template for `/video` that maps `$ARGUMENTS` to `send_video` params. Not auto-registered by plugin; users copy to `.opencode/commands/video.md`.
+- **src/index.ts** - single plugin file. Contains `VideoPlugin` init (ensures `.opencode/video-plugin.json`, `.opencode/video-plugin.md` guide, and `.opencode/commands/video.md` exist, logs) and `send_video` tool. All ffmpeg, fs, path, os, child_process are dynamically imported inside `execute` to keep init lightweight.
+- **Config:** `.opencode/video-plugin.json` (user project, not package) - auto-created as `{}` on first run (works with global plugin in empty directory), optional overrides for resize/transcode/framesFallback/naming. Defaults in `src/index.ts:56`. Guide at `.opencode/video-plugin.md` (auto-created). Example in `examples/video-plugin.json:1`.
+- **Command:** `examples/video-command.md:1` - slash command template for `/video` that maps `$ARGUMENTS` to `send_video` params. Auto-created by plugin at `.opencode/commands/video.md` on first run (not overwritten if exists); manual copy only needed to restore defaults.
 
 ## Dependencies & Compatibility
 

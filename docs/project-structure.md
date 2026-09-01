@@ -27,7 +27,7 @@ Purpose: directory layout and where to find or add code.
 
 - **Source:** single file `src/index.ts` keeps the plugin simple; split only if adding multiple tools.
 - **Build:** `npm run build` (`tsc -p tsconfig.json:1`) emits to `dist/`. `package.json:18` `files` ships only `dist` + `README.md` + `LICENSE`.
-- **Config (user project):** `.opencode/video-plugin.json` is not in this repo; plugin creates it as `{}` on first load (`src/index.ts:16-21`). Users copy `examples/video-plugin.json` if they want overrides.
-- **Commands (user project):** `.opencode/commands/video.md` is not shipped; users copy `examples/video-command.md`.
+- **Config (user project):** `.opencode/video-plugin.json` is not in this repo; plugin auto-creates it as `{}` on first load (`src/index.ts:16-21`) even for a global install in an empty directory. Users copy `examples/video-plugin.json` if they want overrides. Plugin also auto-creates `.opencode/video-plugin.md` guide and `.opencode/commands/video.md` (not overwritten if exists).
+- **Commands (user project):** `.opencode/commands/video.md` is not shipped; plugin auto-creates it from `examples/video-command.md` on first load. Manual copy only needed to restore defaults.
 - **Scripts:** dev helpers, not published, all env-based (see `scripts/test-video.mjs:10`).
 - **No .opencode in repo:** intentionally removed after npm migration; the consumed package is `@esuyo/esuyo-opencode-video` via `opencode.json:19` `plugin` array.

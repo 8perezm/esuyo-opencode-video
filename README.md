@@ -10,7 +10,7 @@ A lightweight OpenCode plugin that gives your AI agents eyes for video. It adds 
 - **Automatic optimization** — probes with `ffprobe` and transcodes with `ffmpeg` to `<1000x1000` at `10fps` (configurable) for fast, token-efficient inference
 - **Resilient delivery** — tries raw `input_video` first, automatically retries as `image_url` frames if the endpoint drops video
 - **Zero hardcoding** — model and endpoint are resolved from your current OpenCode session or environment variables
-- **Slash command ready** — included `/video` template maps `$ARGUMENTS` to `send_video` for quick TUI use
+- **Slash command ready** — `/video` command is auto-created at `.opencode/commands/video.md` on first run and maps `$ARGUMENTS` to `send_video` for quick TUI use
 
 ## Prerequisites
 
@@ -56,9 +56,19 @@ Set these in your shell or `.env` - the plugin resolves them in order:
 
 If you have configured providers in `opencode.json`, the plugin will prefer the `baseURL`/`apiKey` of the provider that matches your selected model (`src/index.ts:97`).
 
-### Plugin config file
+### Plugin config files
 
-Optional file at `.opencode/video-plugin.json` in your project (created as `{}` on first run). Override only what you need - defaults are in `src/index.ts:56`:
+On first run in any project (including an empty directory with a global plugin install), the plugin auto-creates:
+
+- `.opencode/video-plugin.json` — `{}` (empty, defaults active)
+- `.opencode/video-plugin.md` — markdown guide for this plugin (this file's usage/config docs)
+- `.opencode/commands/video.md` — slash command for `/video` (not overwritten if you customize it)
+
+All three are never overwritten if they already exist.
+
+#### `.opencode/video-plugin.json`
+
+Optional file. Override only what you need - defaults are in `src/index.ts:56`:
 
 ```json
 {
@@ -109,18 +119,20 @@ The tool will:
 
 ### Via slash command
 
-Install the template once:
-
-```bash
-mkdir -p .opencode/commands
-cp examples/video-command.md .opencode/commands/video.md
-```
+The plugin auto-creates `.opencode/commands/video.md` on first run (works with a global `opencode.json` install in an empty directory). No manual install needed — restart OpenCode once after the first run if you just installed the plugin.
 
 Then in the TUI:
 
 ```
 /video ./demo.mp4 Describe the UI actions in order
 /video ./demo.mp4
+```
+
+Manual install (only if you deleted the auto-created file or want to restore defaults):
+
+```bash
+mkdir -p .opencode/commands
+cp examples/video-command.md .opencode/commands/video.md
 ```
 
 ### Verify it works
