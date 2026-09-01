@@ -1,0 +1,23 @@
+{
+  "resize": {
+    "maxWidth": 1000,
+    "maxHeight": 1000,
+    "enabled": true
+  },
+  "transcode": {
+    "fps": 10,
+    "crf": 23,
+    "preset": "veryfast",
+    "codec": "libx264",
+    "pixFmt": "yuv420p",
+    "removeAudio": true
+  },
+  "framesFallback": {
+    "fps": 0.2,
+    "width": 640,
+    "maxFrames": 6
+  },
+  "naming": {
+    "suffix": "_1000_10fps"
+  }
+}

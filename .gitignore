@@ -1,0 +1,10 @@
+node_modules
+dist
+*.mp4
+*.mov
+*.avi
+*.mkv
+tmp
+.opencode/node_modules
+.env
+.DS_Store
