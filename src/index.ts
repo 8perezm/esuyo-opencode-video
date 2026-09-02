@@ -7,6 +7,11 @@ import { tool } from "@opencode-ai/plugin"
  * Includes automatic fallback to extracted frames if the gateway/model drops raw video.
  */
 export const VideoPlugin: Plugin = async ({ client, directory }) => {
+  // Session -> model / provider tracking, populated by the chat.message / chat.params hooks.
+  // There is no SDK call that returns "the model selected in the TUI", so we capture it per session.
+  const sessionModel = new Map<string, { providerID: string; modelID: string }>()
+  const sessionProvider = new Map<string, { providerID: string; options: Record<string, any>; key?: string }>()
+
   // Ensure .opencode/video-plugin.json, .opencode/video-plugin.md guide, and .opencode/commands/video.md exist
   const VIDEO_PLUGIN_MD = `# Video Plugin Guide — \`@esuyo/esuyo-opencode-video\`
 
@@ -78,7 +83,7 @@ Set one of these base URLs (or configure \`baseURL\` for the provider that match
 | \`OPENCODE_API_KEY\` / \`LLAMA_API_KEY\` / \`AI_GATEWAY_KEY\` | API key for the gateway |
 | \`OPENCODE_MODEL\` / \`LLAMA_MODEL\` | Fallback model ID if none is selected in the TUI |
 
-If providers are configured in \`opencode.json\`, the plugin prefers the \`baseURL\`/\`apiKey\` of the provider that matches your selected model (\`src/index.ts:97\`).
+The plugin auto-resolves the endpoint and API key for the currently selected model from the live OpenCode session (including providers injected by other plugins at runtime). The env vars above are only used as a fallback.
 
 ## Prerequisites
 
@@ -108,16 +113,13 @@ You have a tool \`send_video\` that will:
 3. Send that file as \`input_video\` to the model
 
 Call \`send_video\` with:
-- \`videoPath\`: first argument of \`$ARGUMENTS\` (e.g. \`$1\` or the full \`$ARGUMENTS\` if no space). For example if user ran \`/video screen.mp4\` use \`screen.mp4\`, if \`/video ./screen_3s_10fps.mp4 hello world\` use first token as path and rest as prompt.
-- \`prompt\`: remaining arguments as prompt, or default to "Describe what's happening in this video in detail. Include actions, text on screen, and sequence of events." if none given
+- \`videoPath\`: first argument of \`$ARGUMENTS\`, handling quoted paths with spaces. If \`$ARGUMENTS\` starts with \`"\` or \`'\`, the video path is the entire quoted string (strip the surrounding quotes). Otherwise it is the first whitespace-separated token. For example if user ran \`/video "videos/Screen Recording 2026-09-01 211638.mp4" Describe the UI\` use \`videos/Screen Recording 2026-09-01 211638.mp4\`, if \`/video ./screen_3s_10fps.mp4 hello world\` use first token as path and rest as prompt. Always strip surrounding quotes from videoPath.
+- \`prompt\`: **ONLY** the remaining arguments after the videoPath (after stripping quotes). This is the *only* text sent to the vision model — do NOT prepend "Video to analyze:" or append any other instructions. If no remaining arguments, omit prompt to use the default "Describe what's happening in this video in detail. Include actions, text on screen, and sequence of events."
 - \`model\`: DO NOT hardcode - use the model currently selected in OpenCode. If user explicitly passes a model id as last argument (contains \`/\`), use that. Otherwise omit \`model\` param so the tool uses the session's current model.
 
 Example: \`/video screen.mp4 Describe the UI\` -> \`send_video({videoPath:"screen.mp4", prompt:"Describe the UI"})\`
 Example: \`/video screen.mp4\` -> \`send_video({videoPath:"screen.mp4"})\`
-
-Do not hardcode baseURL or API keys - the tool will resolve the endpoint from the selected model's provider config or from env \`LLAMA_SERVER_URL\` / \`AI_GATEWAY_URL\`.
-
-After calling the tool, summarize the model's video description for the user.
+Example: \`/video "videos/Screen Recording 2026-09-01 211638.mp4" Describe the UI\` -> \`send_video({videoPath:"videos/Screen Recording 2026-09-01 211638.mp4", prompt:"Describe the UI"})\`
 `
 
   const cwd = (directory as string) ?? process.cwd()
@@ -152,6 +154,34 @@ After calling the tool, summarize the model's video description for the user.
   })
 
   return {
+    // Best-effort tracking hooks: must never throw (a rejection here aborts the user's turn),
+    // and must tolerate any provider shape across opencode versions (nested {info} or flat).
+    "chat.message": async (input) => {
+      try {
+        const i: any = input
+        const m = i?.model
+        if (i?.sessionID && m?.providerID && m?.modelID) {
+          sessionModel.set(i.sessionID, { providerID: m.providerID, modelID: m.modelID })
+        }
+      } catch {}
+    },
+    "chat.params": async (input) => {
+      try {
+        const i: any = input
+        const sid = i?.sessionID
+        if (!sid) return
+        const m = i?.model ?? {}
+        const p: any = i?.provider ?? {}
+        const info: any = p?.info ?? p
+        const providerID = m?.providerID ?? info?.id ?? p?.id
+        if (m?.id && providerID) sessionModel.set(sid, { providerID, modelID: m.id })
+        // model.api.url is the exact baseURL OpenCode will call for this model
+        const options: Record<string, any> = { ...(p?.options ?? {}) }
+        const url = m?.api?.url
+        if (typeof url === "string" && url) options.baseURL = url
+        sessionProvider.set(sid, { providerID, options, key: info?.key ?? p?.key })
+      } catch {}
+    },
     tool: {
       send_video: tool({
         description:
@@ -175,7 +205,7 @@ After calling the tool, summarize the model's video description for the user.
           const defaultCfg = {
             resize: { maxWidth: 1000, maxHeight: 1000, enabled: true },
             transcode: { fps: 10, crf: 23, preset: "veryfast", codec: "libx264", pixFmt: "yuv420p", removeAudio: true },
-            framesFallback: { fps: 0.2, width: 640, maxFrames: 6 },
+            framesFallback: { enabled: true, fps: 0.2, width: 640, maxFrames: 6 } as any,
             naming: { suffix: "_1000_10fps" },
           }
           let cfg: typeof defaultCfg = defaultCfg
@@ -196,57 +226,84 @@ After calling the tool, summarize the model's video description for the user.
             await client.app.log({ body: { service: "video-plugin", level: "warn", message: `Failed to load video-plugin.json, using defaults: ${e.message}` } })
           }
 
-          const rawPath = args.videoPath
+          let rawPath = args.videoPath.trim()
+          // Strip surrounding quotes if LLM passed a quoted path with spaces (e.g. "\"videos/Screen Recording 2026-09-01 211638.mp4\"")
+          if ((rawPath.startsWith('"') && rawPath.endsWith('"')) || (rawPath.startsWith("'") && rawPath.endsWith("'"))) {
+            rawPath = rawPath.slice(1, -1)
+          }
           const resolved = path.isAbsolute(rawPath) ? rawPath : path.resolve((ctx as any).directory ?? process.cwd(), rawPath)
           const prompt = args.prompt ?? "Describe what's happening in this video in detail. Include actions, text on screen, and sequence of events."
-          // No hardcoded model - use caller's selection. Fall back to env or session model via client.config if not provided.
-          let model = args.model
-          if (!model) {
-            try {
-              const cfg: any = await (client as any).config?.get?.()
-              model = cfg?.model ?? cfg?.defaultModel ?? process.env.OPENCODE_MODEL
-            } catch {}
+          // No hardcoded model: prefer args.model, then the session's currently selected model
+          // (tracked via the chat.message hook), then env fallbacks.
+          let providerID: string | undefined
+          let model: string | undefined = args.model
+          const tracked = sessionModel.get(ctx.sessionID)
+          if (!model && tracked) {
+            providerID = tracked.providerID
+            model = tracked.modelID
           }
           if (!model) model = process.env.OPENCODE_MODEL ?? process.env.LLAMA_MODEL
           if (!model) {
             throw new Error(
-              `No model configured. Select a video-enabled model in the OpenCode TUI or pass the "model" parameter (e.g. "qwen3-vl-8b", "gpt-4o"). ` +
-                `You can also set OPENCODE_MODEL or LLAMA_MODEL env vars.`
+              `No model configured. Select a model in the OpenCode TUI, pass the "model" parameter, or set OPENCODE_MODEL / LLAMA_MODEL. ` +
+                (tracked ? `Tracked session model is ${tracked.providerID}/${tracked.modelID} - provider resolution failed, check the endpoint error.` : `No session model captured yet (chat.message hook has not fired for this session).`)
             )
           }
-          // Support both "provider/model" and bare model id
-          const modelForPayload = model
 
-          // Resolve endpoint from provider config for selected model, or env (model-agnostic)
+          // Resolve endpoint + API key, most reliable first:
+          // 1) provider options captured for this session by the chat.params hook (exactly what OpenCode uses)
+          // 2) client.provider.list() -> { all: [{ id, api, key, models }] } (fully-resolved runtime providers,
+          //    including ones injected by other plugins)
+          // 3) env vars
           let baseRaw: string | undefined
           let apiKey: string | undefined = process.env.OPENCODE_API_KEY ?? process.env.LLAMA_API_KEY ?? process.env.AI_GATEWAY_KEY
+          const knownProviderIds = new Set<string>()
+          const sp = sessionProvider.get(ctx.sessionID)
+          if (sp) {
+            if (!providerID) providerID = sp.providerID
+            if (sp.providerID) knownProviderIds.add(sp.providerID)
+            const o: any = sp.options
+            baseRaw = baseRaw ?? o?.baseURL ?? o?.baseUrl ?? o?.api
+            if (typeof o?.apiKey === "string" && o.apiKey && o.apiKey !== "none") apiKey = apiKey ?? o.apiKey
+          }
+          if (providerID) knownProviderIds.add(providerID)
           try {
-            const providers: any = await (client as any).config?.providers?.()
-            // providers shape: { providers: [{id, models, ...}], default: {provider:model} } or similar
-            const list = providers?.providers ?? providers?.data ?? []
-            for (const p of list) {
-              const models = p.models ?? p.modelIds ?? []
-              if (models.includes?.(model) || p.id === model.split("/")[0] || model.startsWith(p.id + "/")) {
-                baseRaw = p.baseURL ?? p.baseUrl ?? p.url ?? p.endpoint
-                apiKey = apiKey ?? p.apiKey ?? p.api_key ?? p.key
+            const provResp: any = await (client as any).provider?.list?.()
+            const all: any[] = provResp?.data?.all ?? provResp?.all ?? []
+            for (const p of all) {
+              if (!p?.id) continue
+              knownProviderIds.add(p.id)
+              const pModelIds = Object.keys(p.models ?? {})
+              const prefix = model.split("/")[0]
+              if (p.id === providerID || p.id === prefix || pModelIds.includes(model) || pModelIds.includes(prefix)) {
+                baseRaw = baseRaw ?? p.api ?? p.options?.baseURL
+                if (typeof p.key === "string" && p.key && p.key !== "none") apiKey = apiKey ?? p.key
+                if (!providerID) providerID = p.id
                 break
               }
             }
-            // also check env-named provider
-            if (!baseRaw) {
-              const cfg: any = await (client as any).config?.get?.()
-              baseRaw = cfg?.provider?.baseURL ?? cfg?.providers?.[model.split("/")[0]]?.baseURL
-            }
-          } catch {}
+          } catch (e: any) {
+            await client.app.log({ body: { service: "video-plugin", level: "warn", message: `provider.list() failed: ${e.message}` } })
+          }
           baseRaw = baseRaw ?? process.env.LLAMA_SERVER_URL ?? process.env.AI_GATEWAY_URL ?? process.env.OPENCODE_API_URL
           if (!baseRaw) {
             throw new Error(
-              `No endpoint configured for model "${model}". Set OPENCODE_API_URL, LLAMA_SERVER_URL or AI_GATEWAY_URL env, or configure a provider for this model in opencode.json. ` +
-                `Select a video-enabled model in the OpenCode TUI (e.g. qwen3-vl-8b, gpt-4o, gemini-2.5-flash).`
+              `No endpoint configured for model "${model}" (provider: ${providerID ?? "unknown"}). Set OPENCODE_API_URL, LLAMA_SERVER_URL or AI_GATEWAY_URL env, or configure a provider with a baseURL for this model in opencode.json. ` +
+                `Select a video-enabled model in the OpenCode TUI.`
             )
           }
           const baseUrl = baseRaw.replace(/\/$/, "")
           const chatUrl = baseUrl.endsWith("/v1") ? `${baseUrl}/chat/completions` : `${baseUrl}/v1/chat/completions`
+
+          // Accept both "provider/model" and bare model id; strip the provider prefix when it matches
+          // a known provider (router aliases like "unsloth/Qwen3.8-27B-GGUF" must be sent as-is).
+          let modelForPayload = model
+          if (model.includes("/")) {
+            const idx = model.indexOf("/")
+            const prefix = model.slice(0, idx)
+            const rest = model.slice(idx + 1)
+            if (rest && knownProviderIds.has(prefix)) modelForPayload = rest
+          }
 
           if (!fssync.existsSync(resolved)) throw new Error(`Video not found: ${resolved} (original: ${rawPath})`)
 
@@ -371,22 +428,26 @@ After calling the tool, summarize the model's video description for the user.
             temperature: 0.2,
           }
 
-          const res = await fetch(chatUrl, { method: "POST", headers, body: JSON.stringify(payload) })
+          const res = await fetch(chatUrl, { method: "POST", headers, body: JSON.stringify(payload), signal: ctx.abort })
           const text = await res.text()
           if (!res.ok) throw new Error(`${res.status} ${text.slice(0, 2000)}`)
           const json: any = JSON.parse(text)
           const promptTokens = json?.usage?.prompt_tokens ?? 0
 
-          // Detect dropped video (gateway strips unknown video)
+          // Detect dropped video (gateway strips unknown video) – video-only mode if framesFallback disabled
           const reply: string = json?.choices?.[0]?.message?.content ?? ""
           const dropped = promptTokens < 100 && /no video was.*attached/i.test(reply)
           if (dropped) {
+            const fallbackEnabled = (cfg as any).framesFallback?.enabled !== false
+            if (!fallbackEnabled) {
+              throw new Error(`Raw video was dropped by gateway (prompt_tokens=${promptTokens}, reply: "${reply.slice(0,200)}"). Fallback to frames is disabled (set .opencode/video-plugin.json framesFallback.enabled=true to allow pictures). Use a video-capable model (qwen3-vl, gpt-4o, gemini-*) or enable fallback. Preprocessed video kept at ${outPath}.`)
+            }
             await client.app.log({ body: { service: "video-plugin", level: "warn", message: "Raw video dropped, falling back to frames from preprocessed file", extra: { promptTokens } } })
             const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-video-frames-"))
             try {
               const fbFps = cfg.framesFallback.fps ?? 0.2
-              const fbW = cfg.framesFallback.width ?? 640
-              const fbMax = cfg.framesFallback.maxFrames ?? 6
+              const fbW = (cfg as any).framesFallback.width ?? 640
+              const fbMax = (cfg as any).framesFallback.maxFrames ?? 6
               await execFileAsync("ffmpeg", ["-y", "-i", outPath, "-vf", `fps=${fbFps},scale=${fbW}:-2`, "-frames:v", String(fbMax), path.join(tmpDir, "frame%02d.jpg")])
               const files = (await fs.readdir(tmpDir)).filter(f => f.endsWith(".jpg")).sort()
               const b64s: string[] = []
@@ -396,19 +457,25 @@ After calling the tool, summarize the model's video description for the user.
                 ...b64s.map(b => ({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b}` } })),
               ]
               const payload2 = { model: modelForPayload, messages: [{ role: "user", content }], max_tokens: 2048, temperature: 0.2 }
-              const res2 = await fetch(chatUrl, { method: "POST", headers, body: JSON.stringify(payload2) })
+              const res2 = await fetch(chatUrl, { method: "POST", headers, body: JSON.stringify(payload2), signal: ctx.abort })
               const t2 = await res2.text()
               if (!res2.ok) throw new Error(t2.slice(0, 2000))
               const j2 = JSON.parse(t2)
-              const out = j2?.choices?.[0]?.message?.content
-              return `Preprocessed video saved to ${outPath} (${outW}x${outH}, ${targetFps}fps, ${Math.round(outStat.size/1024)}KB) but raw was dropped, so sent as ${b64s.length} frames. Result:\n\n${typeof out === "string" ? out : JSON.stringify(j2, null, 2)}`
+              const m2: any = j2?.choices?.[0]?.message
+              const out2: string = typeof m2?.content === "string" && m2.content.trim() !== ""
+                ? m2.content
+                : (typeof m2?.reasoning_content === "string" && m2.reasoning_content.trim() !== "" ? `[model returned reasoning only]\n${m2.reasoning_content}` : JSON.stringify(j2, null, 2))
+              return `Preprocessed video saved to ${outPath} (${outW}x${outH}, ${targetFps}fps, ${Math.round(outStat.size/1024)}KB) but raw was dropped, so sent as ${b64s.length} frames. Result:\n\n${out2}`
             } finally {
               try { const files = await fs.readdir(tmpDir); await Promise.all(files.map(f => fs.unlink(path.join(tmpDir, f)))); await fs.rmdir(tmpDir) } catch {}
             }
           }
 
           const content = json?.choices?.[0]?.message?.content
-          const result = typeof content === "string" ? content : JSON.stringify(json, null, 2)
+          const reasoning = json?.choices?.[0]?.message?.reasoning_content
+          const result = typeof content === "string" && content.trim() !== ""
+            ? content
+            : (typeof reasoning === "string" && reasoning.trim() !== "" ? `[model returned reasoning only]\n${reasoning}` : JSON.stringify(json, null, 2))
           return `Preprocessed video saved to ${outPath} (${outW}x${outH}, ${targetFps}fps, ${Math.round(outStat.size/1024)}KB, prompt_tokens=${promptTokens}). Model output:\n\n${result}`
         },
       }),

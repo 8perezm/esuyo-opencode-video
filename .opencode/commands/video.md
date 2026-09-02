@@ -17,12 +17,3 @@ Call `send_video` with:
 Example: `/video screen.mp4 Describe the UI` -> `send_video({videoPath:"screen.mp4", prompt:"Describe the UI"})`
 Example: `/video screen.mp4` -> `send_video({videoPath:"screen.mp4"})`
 Example: `/video "videos/Screen Recording 2026-09-01 211638.mp4" Describe the UI` -> `send_video({videoPath:"videos/Screen Recording 2026-09-01 211638.mp4", prompt:"Describe the UI"})`
-
-# Install
-
-Copy this file to your project's `.opencode/commands/video.md` (create directory if missing):
-
-```bash
-mkdir -p .opencode/commands
-cp examples/video-command.md .opencode/commands/video.md
-```
