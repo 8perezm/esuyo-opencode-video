@@ -1,6 +1,6 @@
 {
   "name": "@esuyo/esuyo-opencode-video",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "OpenCode plugin to send video as input_video to vision models with ffmpeg preprocessing (<1000x1000, 10fps) and automatic frame fallback",
   "type": "module",
   "main": "./dist/index.js",
