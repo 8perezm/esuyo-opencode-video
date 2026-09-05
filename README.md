@@ -23,6 +23,16 @@ A lightweight OpenCode plugin that gives your AI agents eyes for video. It adds 
 
 The plugin is published as `@esuyo/esuyo-opencode-video` on npm. OpenCode installs npm plugins automatically with `bun`.
 
+**Recommended (CLI):**
+
+```bash
+opencode plugin @esuyo/esuyo-opencode-video -g -f
+```
+
+`-g` installs it in your global config (`~/.config/opencode/opencode.json`), `-f` replaces any existing version. This also handles updates — re-run the same command after a new npm release, then restart OpenCode.
+
+**Manual (project config):**
+
 1. Add the plugin to your project's `opencode.json` or `opencode.jsonc`:
 
 ```jsonc
