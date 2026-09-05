@@ -5,11 +5,11 @@ Purpose: directory layout and where to find or add code.
 ```
 .
 ├── src/
-│   └── index.ts              # Plugin entry, VideoPlugin + send_video tool (src/index.ts:1)
+│   └── index.ts              # Plugin entry, VideoPlugin + send_video tool
 ├── dist/                     # Build output (tsc -> dist/index.js + index.d.ts), published, gitignored
 ├── examples/
-│   ├── video-plugin.json     # Example config for .opencode/video-plugin.json (examples/video-plugin.json:1)
-│   └── video-command.md      # Slash command template for .opencode/commands/video.md (examples/video-command.md:1)
+│   ├── video-plugin.json     # Example config for .opencode/video-plugin.json
+│   └── video-command.md      # Slash command template for .opencode/commands/video.md
 ├── scripts/
 │   ├── test-video.mjs        # Dev probe for raw input_video (env-only, no secrets)
 │   ├── test-frames.mjs       # Dev probe for image_url frames fallback
@@ -26,8 +26,8 @@ Purpose: directory layout and where to find or add code.
 ## Conventions
 
 - **Source:** single file `src/index.ts` keeps the plugin simple; split only if adding multiple tools.
-- **Build:** `npm run build` (`tsc -p tsconfig.json:1`) emits to `dist/`. `package.json:18` `files` ships only `dist` + `README.md` + `LICENSE`.
-- **Config (user project):** `.opencode/video-plugin.json` is not in this repo; plugin auto-creates it as `{}` on first load (`src/index.ts:16-21`) even for a global install in an empty directory. Users copy `examples/video-plugin.json` if they want overrides. Plugin also auto-creates `.opencode/video-plugin.md` guide and `.opencode/commands/video.md` (not overwritten if exists).
-- **Commands (user project):** `.opencode/commands/video.md` is not shipped; plugin auto-creates it from `examples/video-command.md` on first load. Manual copy only needed to restore defaults.
-- **Scripts:** dev helpers, not published, all env-based (see `scripts/test-video.mjs:10`).
-- **No .opencode in repo:** intentionally removed after npm migration; the consumed package is `@esuyo/esuyo-opencode-video` via `opencode.json:19` `plugin` array.
+- **Build:** `npm run build` (`tsc -p tsconfig.json`) emits to `dist/`. `package.json` `files` ships only `dist` + `README.md` + `LICENSE`.
+- **Config (user project):** `.opencode/video-plugin.json` is not in this repo and never auto-created (`src/index.ts` is read-only for config; missing = defaults). Users copy `examples/video-plugin.json` if they want overrides.
+- **Commands (user project):** `.opencode/commands/video.md` is not shipped and never auto-created. Manual copy from `examples/video-command.md` only if the user wants `/video`.
+- **Scripts:** dev helpers, not published, all env-based.
+- **No .opencode in repo:** intentionally removed after npm migration; the consumed package is `@esuyo/esuyo-opencode-video` via `opencode.json` `plugin` array.

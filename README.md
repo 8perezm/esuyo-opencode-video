@@ -10,7 +10,7 @@ A lightweight OpenCode plugin that gives your AI agents eyes for video. It adds 
 - **Automatic optimization** — probes with `ffprobe` and transcodes with `ffmpeg` to `<1000x1000` at `10fps` (configurable) for fast, token-efficient inference
 - **Resilient delivery** — tries raw `input_video` first, automatically retries as `image_url` frames if the endpoint drops video
 - **Zero hardcoding** — model and endpoint are resolved from your current OpenCode session or environment variables
-- **Slash command ready** — `/video` command is auto-created at `.opencode/commands/video.md` on first run and maps `$ARGUMENTS` to `send_video` for quick TUI use
+- **Slash command ready** — optional `/video` command template at `examples/video-command.md`; copy to `.opencode/commands/video.md` if you want quick TUI use
 
 ## Prerequisites
 
@@ -54,21 +54,22 @@ Set these in your shell or `.env` - the plugin resolves them in order:
 | `OPENCODE_API_KEY` / `LLAMA_API_KEY` / `AI_GATEWAY_KEY` | API key for the gateway |
 | `OPENCODE_MODEL` / `LLAMA_MODEL` | Fallback model ID if none is selected in the TUI |
 
-If you have configured providers in `opencode.json`, the plugin will prefer the `baseURL`/`apiKey` of the provider that matches your selected model (`src/index.ts:97`).
+If you have configured providers in `opencode.json`, the plugin will prefer the `baseURL`/`apiKey` of the provider that matches your selected model.
 
 ### Plugin config files
 
-On first run in any project (including an empty directory with a global plugin install), the plugin auto-creates:
+The plugin never writes to `.opencode/` — no files are created automatically.
+Everything works with defaults out of the box. Only add files if you want
+to override defaults or add a slash command:
 
-- `.opencode/video-plugin.json` — `{}` (empty, defaults active)
-- `.opencode/video-plugin.md` — markdown guide for this plugin (this file's usage/config docs)
-- `.opencode/commands/video.md` — slash command for `/video` (not overwritten if you customize it)
+- `.opencode/video-plugin.json` — optional overrides (copy from `examples/video-plugin.json`)
+- `.opencode/commands/video.md` — optional `/video` slash command (copy from `examples/video-command.md`)
 
-All three are never overwritten if they already exist.
+Nothing is overwritten — these are your files once you create them.
 
 #### `.opencode/video-plugin.json`
 
-Optional file. Override only what you need - defaults are in `src/index.ts:56`:
+Optional file. Override only what you need - defaults are in `src/index.ts` (`defaultCfg`):
 
 ```json
 {
@@ -79,7 +80,7 @@ Optional file. Override only what you need - defaults are in `src/index.ts:56`:
 }
 ```
 
-Example override (`examples/video-plugin.json:1`):
+Example override (`examples/video-plugin.json`):
 
 ```json
 {
@@ -104,7 +105,7 @@ Or directly:
 send_video({ videoPath: "./demo.mp4", prompt: "Summarize the actions in order, including on-screen text" })
 ```
 
-Tool params (`src/index.ts:37`):
+Tool params (`src/index.ts`, `send_video` tool):
 
 - `videoPath` - absolute or project-relative path (e.g. `./video.mp4`)
 - `prompt` - instruction (default: detailed description of actions, text, sequence)
@@ -119,7 +120,12 @@ The tool will:
 
 ### Via slash command
 
-The plugin auto-creates `.opencode/commands/video.md` on first run (works with a global `opencode.json` install in an empty directory). No manual install needed — restart OpenCode once after the first run if you just installed the plugin.
+Optional — only if you want `/video` in the TUI. Copy the template once:
+
+```bash
+mkdir -p .opencode/commands
+cp examples/video-command.md .opencode/commands/video.md
+```
 
 Then in the TUI:
 
@@ -127,9 +133,7 @@ Then in the TUI:
 /video ./demo.mp4 Describe the UI actions in order
 /video ./demo.mp4
 ```
-
-Manual install (only if you deleted the auto-created file or want to restore defaults):
-
+# Restore defaults at any time by re-copying the template:
 ```bash
 mkdir -p .opencode/commands
 cp examples/video-command.md .opencode/commands/video.md
@@ -149,17 +153,17 @@ You should see a new `<name>_1000_10fps.mp4` next to your source and a model des
 
 ## Troubleshooting / FAQ
 
-**`ffmpeg failed (vf=...) - is ffmpeg installed?`** (`src/index.ts:195`)
+**`ffmpeg failed (vf=...) - is ffmpeg installed?`**
 Install ffmpeg/ffprobe and ensure they are on `PATH`.
 
-**`No endpoint configured for model "..."`** (`src/index.ts:117`)
+**`No endpoint configured for model "..."`**
 Set `OPENCODE_API_URL` (or `LLAMA_SERVER_URL`/`AI_GATEWAY_URL`) or configure the provider `baseURL` in `opencode.json` for that model's prefix.
 
-**`No model configured`** (`src/index.ts:86`)
+**`No model configured`**
 Select a model in the OpenCode TUI (`/model`) or pass `model` explicitly to `send_video`, or set `OPENCODE_MODEL`.
 
 **Video is ignored but request returns 200 (`prompt_tokens` ~16, reply "no video was attached")**
-Your model/gateway only advertises `input_modalities: ["text","image"]`. The plugin detects this and automatically falls back to `image_url` frames (`src/index.ts:258`). For native raw video, switch to a model with `input_modalities` containing `video` (e.g. `qwen3-vl`, `gemini-2.5-flash`).
+Your model/gateway only advertises `input_modalities: ["text","image"]`. The plugin detects this and automatically falls back to `image_url` frames. For native raw video, switch to a model with `input_modalities` containing `video` (e.g. `qwen3-vl`, `gemini-2.5-flash`).
 
 **Output video is too large / too many tokens**
 Lower `transcode.fps` or `resize.maxWidth` in `.opencode/video-plugin.json` (e.g. `fps: 5`, `maxWidth: 800`).

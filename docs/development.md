@@ -58,12 +58,13 @@ Alternative: `npm link` this package and add `"plugin": ["@esuyo/esuyo-opencode-
 
 ## Debugging
 
-- Plugin logs via `client.app.log` (`src/index.ts:21`, `src/index.ts:31`) appear in OpenCode logs.
-- Check `ffprobe`/`ffmpeg` errors: `"ffmpeg failed (vf=...)` (`src/index.ts:195`)
-- Verify config loaded: `"Loaded video-plugin.json"` (`src/index.ts:74`)
+- Plugin logs via `client.app.log` appear in OpenCode logs.
+- Check `ffprobe`/`ffmpeg` errors: `"ffmpeg failed (vf=...)`
+- Verify config loaded: `"Loaded video-plugin.json"`
 
 ## Conventions
 
 - Keep `src/index.ts` self-contained; dynamic imports inside `execute` for fs/path/os/child_process.
-- Keep model-agnostic - never hardcode model IDs or gateway URLs; resolve via session model or `OPENCODE_*`/`LLAMA_*`/`AI_GATEWAY_*` env (`src/index.ts:84-116`).
+- Keep model-agnostic - never hardcode model IDs or gateway URLs; resolve via session model or `OPENCODE_*`/`LLAMA_*`/`AI_GATEWAY_*` env.
+- Never write to `.opencode/` from the plugin; config and commands are opt-in via `examples/`.
 - Update `examples/video-plugin.json` when adding config fields, and document in `README.md` + `docs/architecture.md`.

@@ -6,148 +6,13 @@ import { tool } from "@opencode-ai/plugin"
  * Pre-processes video to <1000x1000 + 10fps before sending as raw input_video.
  * Includes automatic fallback to extracted frames if the gateway/model drops raw video.
  */
-export const VideoPlugin: Plugin = async ({ client, directory }) => {
+export const VideoPlugin: Plugin = async ({ client }) => {
   // Session -> model / provider tracking, populated by the chat.message / chat.params hooks.
   // There is no SDK call that returns "the model selected in the TUI", so we capture it per session.
+  // NOTE: this plugin never writes to .opencode/ — no video-plugin.json, video-plugin.md,
+  // or commands/video.md are auto-created. Missing config = defaults (see README + examples/).
   const sessionModel = new Map<string, { providerID: string; modelID: string }>()
   const sessionProvider = new Map<string, { providerID: string; options: Record<string, any>; key?: string }>()
-
-  // Ensure .opencode/video-plugin.json, .opencode/video-plugin.md guide, and .opencode/commands/video.md exist
-  const VIDEO_PLUGIN_MD = `# Video Plugin Guide — \`@esuyo/esuyo-opencode-video\`
-
-This project uses the \`send_video\` tool and \`/video\` slash command to send video to any video-enabled vision model (e.g. \`qwen3-vl\`, \`gpt-4o\`, \`gemini-*\`, local \`llama.cpp\` with \`--mmproj\`).
-
-## Quick start
-
-Via agent:
-
-\`\`\`
-Use send_video to describe ./demo.mp4
-send_video({ videoPath: "./demo.mp4", prompt: "Summarize actions in order, include on-screen text" })
-\`\`\`
-
-Via slash command (TUI):
-
-\`\`\`
-/video ./demo.mp4 Describe the UI actions in order
-/video ./demo.mp4
-\`\`\`
-
-## What the plugin does
-
-1. Probes dimensions via \`ffprobe\`
-2. Resizes to \`<1000x1000\` if larger (\`scale=1000:1000:force_original_aspect_ratio=decrease\`)
-3. Forces \`10fps\` and even dimensions (\`fps=10, scale=trunc(iw/2)*2:trunc(ih/2)*2\`)
-4. Transcodes to \`<name>_1000_10fps.mp4\` next to the source and sends as \`input_video\` to \`POST {baseUrl}/v1/chat/completions\`
-5. If the gateway strips raw video (200 OK but \`prompt_tokens\` ~16 and reply contains "no video was attached"), retries automatically as \`image_url\` frames
-
-## Configuration — \`.opencode/video-plugin.json\`
-
-Optional file (auto-created as \`{}\` on first run). Override only what you need — defaults in \`src/index.ts:56\`:
-
-\`\`\`json
-{
-  "resize": { "maxWidth": 1000, "maxHeight": 1000, "enabled": true },
-  "transcode": { "fps": 10, "crf": 23, "preset": "veryfast", "codec": "libx264", "pixFmt": "yuv420p", "removeAudio": true },
-  "framesFallback": { "fps": 0.2, "width": 640, "maxFrames": 6 },
-  "naming": { "suffix": "_1000_10fps" }
-}
-\`\`\`
-
-Example override (\`examples/video-plugin.json\`):
-
-\`\`\`json
-{
-  "resize": { "maxWidth": 800 },
-  "transcode": { "fps": 5, "crf": 28 }
-}
-\`\`\`
-
-## Slash command — \`/video\`
-
-File: \`.opencode/commands/video.md\` (auto-created on first run; not overwritten if it exists). Maps \`$ARGUMENTS\` to \`send_video\`:
-
-- \`videoPath\`: first token of \`$ARGUMENTS\`
-- \`prompt\`: remaining tokens, or default detailed description if none
-- \`model\`: omit to use the model currently selected in OpenCode
-
-To restore defaults, delete the file and restart OpenCode, or copy from \`examples/video-command.md\`.
-
-## Environment / endpoint resolution
-
-Set one of these base URLs (or configure \`baseURL\` for the provider that matches your selected model in \`opencode.json\`):
-
-| Variable | Purpose |
-|---|---|
-| \`OPENCODE_API_URL\` / \`LLAMA_SERVER_URL\` / \`AI_GATEWAY_URL\` | Base URL of your OpenAI-compatible gateway (e.g. \`https://your-gateway.example.com/v1\` or \`http://localhost:8080/v1\`) |
-| \`OPENCODE_API_KEY\` / \`LLAMA_API_KEY\` / \`AI_GATEWAY_KEY\` | API key for the gateway |
-| \`OPENCODE_MODEL\` / \`LLAMA_MODEL\` | Fallback model ID if none is selected in the TUI |
-
-The plugin auto-resolves the endpoint and API key for the currently selected model from the live OpenCode session (including providers injected by other plugins at runtime). The env vars above are only used as a fallback.
-
-## Prerequisites
-
-- Node.js >=18
-- \`ffmpeg\` and \`ffprobe\` on \`PATH\` (\`ffmpeg -version\`)
-- A video-enabled vision model exposed via OpenAI-compatible \`POST /v1/chat/completions\`
-
-## Troubleshooting
-
-- \`ffmpeg failed (vf=...) - is ffmpeg installed?\` (\`src/index.ts:195\`) — install ffmpeg/ffprobe and ensure they are on \`PATH\`.
-- \`No endpoint configured for model "..."\` (\`src/index.ts:117\`) — set \`OPENCODE_API_URL\` (or \`LLAMA_SERVER_URL\`/\`AI_GATEWAY_URL\`) or configure the provider \`baseURL\` in \`opencode.json\`.
-- \`No model configured\` (\`src/index.ts:86\`) — select a model in the TUI (\`/model\`) or pass \`model\` to \`send_video\`, or set \`OPENCODE_MODEL\`.
-- Video is ignored but 200 OK (\`prompt_tokens\` ~16, reply "no video was attached") — gateway only advertises \`text,image\`. Plugin falls back to frames automatically; for native raw video switch to a model with \`input_modalities: ["video"]\`.
-
-This file is auto-generated on first run and never overwritten. Edit freely.
-`
-
-  const VIDEO_COMMAND_MD = `---
-description: Send video to vision model (auto-resize <1000x1000, 10fps)
----
-
-Video to analyze: $ARGUMENTS
-
-You have a tool \`send_video\` that will:
-1. Check dimensions via ffprobe, resize to <1000x1000 if needed
-2. Transcode to 10fps and save as new file (e.g. \`*_1000_10fps.mp4\`)
-3. Send that file as \`input_video\` to the model
-
-Call \`send_video\` with:
-- \`videoPath\`: first argument of \`$ARGUMENTS\`, handling quoted paths with spaces. If \`$ARGUMENTS\` starts with \`"\` or \`'\`, the video path is the entire quoted string (strip the surrounding quotes). Otherwise it is the first whitespace-separated token. For example if user ran \`/video "videos/Screen Recording 2026-09-01 211638.mp4" Describe the UI\` use \`videos/Screen Recording 2026-09-01 211638.mp4\`, if \`/video ./screen_3s_10fps.mp4 hello world\` use first token as path and rest as prompt. Always strip surrounding quotes from videoPath.
-- \`prompt\`: **ONLY** the remaining arguments after the videoPath (after stripping quotes). This is the *only* text sent to the vision model — do NOT prepend "Video to analyze:" or append any other instructions. If no remaining arguments, omit prompt to use the default "Describe what's happening in this video in detail. Include actions, text on screen, and sequence of events."
-- \`model\`: DO NOT hardcode - use the model currently selected in OpenCode. If user explicitly passes a model id as last argument (contains \`/\`), use that. Otherwise omit \`model\` param so the tool uses the session's current model.
-
-Example: \`/video screen.mp4 Describe the UI\` -> \`send_video({videoPath:"screen.mp4", prompt:"Describe the UI"})\`
-Example: \`/video screen.mp4\` -> \`send_video({videoPath:"screen.mp4"})\`
-Example: \`/video "videos/Screen Recording 2026-09-01 211638.mp4" Describe the UI\` -> \`send_video({videoPath:"videos/Screen Recording 2026-09-01 211638.mp4", prompt:"Describe the UI"})\`
-`
-
-  const cwd = (directory as string) ?? process.cwd()
-  try {
-    const fs = await import("node:fs/promises")
-    const fssync = await import("node:fs")
-    const path = await import("node:path")
-    const jsonPath = path.resolve(cwd, ".opencode", "video-plugin.json")
-    const mdPath = path.resolve(cwd, ".opencode", "video-plugin.md")
-    const commandPath = path.resolve(cwd, ".opencode", "commands", "video.md")
-    if (!fssync.existsSync(jsonPath) || (await fs.readFile(jsonPath, "utf8")).trim() === "") {
-      await fs.mkdir(path.dirname(jsonPath), { recursive: true })
-      await fs.writeFile(jsonPath, "{}\n", "utf8")
-      await client.app.log({ body: { service: "video-plugin", level: "info", message: "Created .opencode/video-plugin.json (empty, defaults active)" } })
-    }
-    if (!fssync.existsSync(mdPath)) {
-      await fs.mkdir(path.dirname(mdPath), { recursive: true })
-      await fs.writeFile(mdPath, VIDEO_PLUGIN_MD, "utf8")
-      await client.app.log({ body: { service: "video-plugin", level: "info", message: "Created .opencode/video-plugin.md guide" } })
-    }
-    if (!fssync.existsSync(commandPath)) {
-      await fs.mkdir(path.dirname(commandPath), { recursive: true })
-      await fs.writeFile(commandPath, VIDEO_COMMAND_MD, "utf8")
-      await client.app.log({ body: { service: "video-plugin", level: "info", message: "Created .opencode/commands/video.md (/video command)" } })
-    }
-  } catch (e: any) {
-    await client.app.log({ body: { service: "video-plugin", level: "warn", message: `Could not ensure video-plugin files: ${e.message}` } })
-  }
 
   await client.app.log({
     body: { service: "video-plugin", level: "info", message: "Video plugin initialized (preprocess <1000x1000 + 10fps)" },
@@ -201,7 +66,7 @@ Example: \`/video "videos/Screen Recording 2026-09-01 211638.mp4" Describe the U
           const { promisify } = await import("node:util")
           const execFileAsync = promisify(execFile)
 
-          // Load .opencode/video-plugin.json (resize/fps configurable)
+          // Optional .opencode/video-plugin.json (never auto-created; missing = defaults).
           const defaultCfg = {
             resize: { maxWidth: 1000, maxHeight: 1000, enabled: true },
             transcode: { fps: 10, crf: 23, preset: "veryfast", codec: "libx264", pixFmt: "yuv420p", removeAudio: true },
